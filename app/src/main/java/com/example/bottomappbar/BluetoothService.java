@@ -9,6 +9,7 @@ import android.bluetooth.BluetoothServerSocket;
 import android.bluetooth.BluetoothSocket;
 import android.content.DialogInterface;
 import android.content.Intent;
+import java.nio.charset.StandardCharsets;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -26,6 +27,7 @@ import com.google.android.material.textfield.TextInputEditText;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Objects;
 
 public class BluetoothService {
     Activity mainActivity;
@@ -38,20 +40,39 @@ public class BluetoothService {
     TextInputEditText inputMsg;
     Button btnSend;
     boolean isSend= false;
+    boolean dialog = true;
+    boolean firstTime = true;
     String msg;
     @SuppressLint("HandlerLeak")
     private Handler handler = new Handler(){
         @Override
         public void handleMessage(@NonNull Message msg) {
-            coordinatorLayoutWaiting.setVisibility(View.INVISIBLE);
-            super.handleMessage(msg);
+            if(!dialog) {
+                coordinatorLayoutWaiting.setVisibility(View.INVISIBLE);
+                btnSend.setVisibility(View.VISIBLE);
+                inputMsg.setVisibility(View.VISIBLE);
+            }
             //Receive msg from Thread
-            String value = msg.obj.toString();
+            String value = new String((byte[]) msg.obj, StandardCharsets.UTF_8);
+            //Token String
+            //value: "Start*******" --> "Start"
+
+
+            // Start
+            // Emotion: "Emotion1"
+            // Win lose
+            // Cancel connect
+            // Position
+            // State game
+            // Turn Game
+
             //Set text on screen
-            if(turnMessage==1)
-                 txtMsg.append("I: "+value+"/n");
-            if(turnMessage==2)
-                txtMsg.append("You: "+value+"/n");
+            if(!value.contains("Start")){
+             if(turnMessage==1)
+                 txtMsg.append("I: "+value+"\n");
+            else if(turnMessage==2)
+                txtMsg.append("You: "+value+"\n");
+             }
         }
     }; // handler that gets info from Bluetooth service
     private static final String TAG = "MY_APP_DEBUG_TAG";
@@ -76,7 +97,9 @@ public class BluetoothService {
             @Override
             public void onClick(View v) {
                 isSend = true;
-                msg = txtMsg.getText().toString();
+                msg = Objects.requireNonNull(inputMsg.getText()).toString();
+                inputMsg.clearFocus();
+                inputMsg.setText("");
             }
         });
     }
@@ -111,7 +134,6 @@ public class BluetoothService {
             BluetoothServerSocket tmp = null;
             try {
                 // MY_UUID is the app's UUID string, also used by the client code.
-                bluetoothAdapter = bluetoothAdapter;
                 String NAME = bluetoothAdapter.getName();
                 tmp = bluetoothAdapter.listenUsingRfcommWithServiceRecord(NAME, Bluetooth.MY_UUID);
             } catch (IOException e) {
@@ -148,14 +170,24 @@ public class BluetoothService {
 
 
         private void manageMyConnectedSocket(BluetoothSocket socket) {
-            while (true){
-                    ConnectedThread connectedThread = new ConnectedThread(socket);
-                    connectedThread.start();
-                    if(isSend){
-                        ConnectedThread connectedThreadWrite = new ConnectedThread(socket);
-                        connectedThreadWrite.write(msg.getBytes());
-                        isSend = false;
-                    }
+            dialog=false;
+            while (true) {
+
+                ConnectedThread connectedThread = new ConnectedThread(socket);
+                connectedThread.start();
+
+                if (isSend) {
+                    ConnectedThread connectedThreadWrite = new ConnectedThread(socket);
+                    connectedThreadWrite.write(msg.getBytes());
+                    isSend = false;
+                }
+                try{
+                    Thread.sleep(100);
+                }catch (InterruptedException ignored){
+                        break;
+                }
+
+
             }
         }
 
@@ -176,7 +208,6 @@ public class BluetoothService {
         private  BluetoothSocket mmSocket;
         private  BluetoothDevice mmDevice;
         public ClientThread(BluetoothDevice device) {
-            bluetoothAdapter = bluetoothAdapter;
             // Use a temporary object that is later assigned to mmSocket
             // because mmSocket is final.
             BluetoothSocket tmp = null;
@@ -216,18 +247,35 @@ public class BluetoothService {
         }
 
         private void manageMyConnectedSocket(BluetoothSocket mmSocket) {
-            ConnectedThread fistConnect = new ConnectedThread(mmSocket);
-            String s = bluetoothAdapter.getName()+ "Client connected with server"+ mmDevice.getName();
-            fistConnect.write(s.getBytes());
-            while (true){
-                ConnectedThread connectedThread = new ConnectedThread(mmSocket);
-                connectedThread.start();
-                if(isSend){
-                    ConnectedThread connectedThreadWrite = new ConnectedThread(mmSocket);
-                    connectedThreadWrite.write(msg.getBytes());
-                    isSend = false;
-                }
-            }
+            dialog=false;
+//            if(firstTime) {
+//                ConnectedThread send = new ConnectedThread(mmSocket);
+////                String s = bluetoothAdapter.getName() + " connected with server " + mmDevice.getName();
+////                String s="Start";
+////                send.write(s.getBytes());
+////                firstTime=false;
+//            }
+               ConnectedThread send = new ConnectedThread(mmSocket);
+               String s="Start";
+               send.write(s.getBytes());
+             while (true) {
+
+                 //Listen
+                 ConnectedThread connectedThread = new ConnectedThread(mmSocket);
+                 connectedThread.start();
+
+                 //Send
+                 if (isSend) {
+                     ConnectedThread connectedThreadWrite = new ConnectedThread(mmSocket);
+                     connectedThreadWrite.write(msg.getBytes());
+                     isSend = false;
+                 }
+                 try{
+                     Thread.sleep(100);
+                 }catch (InterruptedException ignored){
+                        break;
+                 }
+             }
         }
 
         // Closes the client socket and causes the thread to finish.
@@ -244,7 +292,6 @@ public class BluetoothService {
         private final BluetoothSocket mmSocket;
         private final InputStream mmInStream;
         private final OutputStream mmOutStream;
-        private byte[] mmBuffer; // mmBuffer store for the stream
 
         public ConnectedThread(BluetoothSocket socket) {
             mmSocket = socket;
@@ -269,7 +316,8 @@ public class BluetoothService {
         }
 
         public void run() {
-            mmBuffer = new byte[1024];
+            // mmBuffer store for the stream
+            byte[] mmBuffer = new byte[1024];
             int numBytes; // bytes returned from read()
 
             // Keep listening to the InputStream until an exception occurs.
@@ -281,8 +329,9 @@ public class BluetoothService {
                     Message readMsg = handler.obtainMessage(
                             MessageConstants.MESSAGE_READ, numBytes, -1,
                             mmBuffer);
+                    turnMessage = 2;
                     readMsg.sendToTarget();
-                    turnMessage = 1;
+
                 } catch (IOException e) {
                     Log.d(TAG, "Input stream was disconnected", e);
                     break;
@@ -294,12 +343,11 @@ public class BluetoothService {
         public void write(byte[] bytes) {
             try {
                 mmOutStream.write(bytes);
-
                 // Share the sent message with the UI activity.
                 Message writtenMsg = handler.obtainMessage(
                         MessageConstants.MESSAGE_WRITE, -1, -1, bytes);
+                turnMessage = 1;
                 writtenMsg.sendToTarget();
-                turnMessage = 2;
             } catch (IOException e) {
                 Log.e(TAG, "Error occurred when sending data", e);
 
